@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>SignalRGB 风扇模型生成器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h2>SignalRGB 风扇模型生成器</h2>
+
+  <div class="form">
+    <label>灯珠数: <input id="ledCount" type="number" value="8"></label><br>
+    <label>宽度: <input id="width" type="number" value="15"></label><br>
+    <label>高度: <input id="height" type="number" value="15"></label><br>
+    <label>半径: <input id="radius" type="number" value="5"></label><br>
+    <label>起始角度(度): <input id="startAngle" type="number" value="0"></label><br>
+    <label>产品名: <input id="prodName" value="CustomFan"></label><br>
+  </div>
+
+  <button onclick="generate()">生成模型</button>
+  <button onclick="downloadJson()">导出模型</button>
+  <input type="file" id="fileInput" accept=".json">
+
+  <canvas id="preview" width="300" height="300"></canvas>
+  <pre id="output"></pre>
+
+  <script src="script.js"></script>
+</body>
+</html>
