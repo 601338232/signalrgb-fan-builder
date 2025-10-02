@@ -1,29 +1,402 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8">
-  <title>SignalRGB 风扇模型生成器</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SignalRGB 风扇/网格模型编辑器</title>
+<style>
+  :root { --panel-w: 320px; --canvas-size: 700px; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Microsoft Yahei", Arial; margin: 18px; background: #fafafa; color:#222;}
+  h1 { margin: 0 0 10px 0; font-size:18px;}
+  .wrap { display:flex; gap:18px; align-items:flex-start; }
+  .left { width: var(--panel-w); background:#fff; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+  .left label { display:block; margin:8px 0 4px; font-size:13px; }
+  input[type="text"], input[type="number"] { width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #ddd; border-radius:6px; }
+  button { margin:8px 6px 0 0; padding:7px 12px; border-radius:6px; border:0; background:#2f7efc; color:#fff; cursor:pointer;}
+  button.secondary { background:#666; }
+  button.warn { background:#e44; }
+  .meta { font-size:13px; margin-top:6px; }
+  .canvas-wrap { background:#fff; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+  canvas { background: linear-gradient(#fff,#fff); display:block; border:1px solid #ccc; cursor:crosshair; }
+  .controls { margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  pre { background:#0f1724; color:#e6eef8; padding:10px; border-radius:6px; max-height:220px; overflow:auto; font-size:12px; }
+  .stat { font-weight:600; margin-top:8px; }
+  .hint { font-size:12px; color:#666; margin-top:6px; }
+  .fileinput { display:none; }
+  footer { margin-top:12px; font-size:12px; color:#666; }
+  .row { display:flex; gap:8px; }
+</style>
 </head>
 <body>
-  <h2>SignalRGB 风扇模型生成器</h2>
+  <h1>SignalRGB 网格 / 风扇模型可视化编辑器</h1>
+  <div class="wrap">
+    <div class="left">
+      <label>产品名（ProductName）</label>
+      <input id="prodName" type="text" value="CustomFan">
+      <label>显示名（DisplayName）</label>
+      <input id="displayName" type="text" value="CustomFan">
+      <label>品牌（Brand）</label>
+      <input id="brand" type="text" value="Custom">
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <div style="flex:1;">
+          <label>宽度（Width，格数）</label>
+          <input id="gridW" type="number" min="1" value="15">
+        </div>
+        <div style="flex:1;">
+          <label>高度（Height，格数）</label>
+          <input id="gridH" type="number" min="1" value="15">
+        </div>
+      </div>
 
-  <div class="form">
-    <label>灯珠数: <input id="ledCount" type="number" value="8"></label><br>
-    <label>宽度: <input id="width" type="number" value="15"></label><br>
-    <label>高度: <input id="height" type="number" value="15"></label><br>
-    <label>半径: <input id="radius" type="number" value="5"></label><br>
-    <label>起始角度(度): <input id="startAngle" type="number" value="0"></label><br>
-    <label>产品名: <input id="prodName" value="CustomFan"></label><br>
+      <div class="row" style="margin-top:8px;">
+        <div style="flex:1;">
+          <label>格子像素大小（px，可调整）</label>
+          <input id="cellPx" type="number" min="6" value="32">
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="btnGen">生成网格</button>
+        <button id="btnReset" class="secondary">重置灯珠</button>
+        <button id="btnClear" class="warn">清空所有</button>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label>导入 / 导出</label>
+        <div class="controls">
+          <input id="fileIn" class="fileinput" type="file" accept=".json">
+          <button id="btnOpen">打开 JSON</button>
+          <button id="btnExport">导出 JSON</button>
+          <button id="btnDownload">下载 JSON</button>
+        </div>
+        <div class="hint">导入 SignalRGB JSON 会还原 <code>LedCoordinates</code> 坐标并填回宽高/名称（若存在）。</div>
+      </div>
+
+      <div class="meta">
+        <div class="stat">灯珠数量： <span id="ledCount">0</span></div>
+        <div class="stat">当前模式：<span id="mode">点选放置 / 拖动移动</span></div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label>JSON 预览</label>
+        <pre id="jsonOut">{}</pre>
+      </div>
+
+      <footer>
+        使用方法：生成网格 → 单击格子添加 LED → 再次单击删除 → 拖动已放置 LED 可移动位置。<br>
+        生成后点击“下载 JSON”保存模型到本地（可直接放入 SignalRGB Layouts）。
+      </footer>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="gridCanvas" width="700" height="700"></canvas>
+    </div>
   </div>
 
-  <button onclick="generate()">生成模型</button>
-  <button onclick="downloadJson()">导出模型</button>
-  <input type="file" id="fileInput" accept=".json">
+<script>
+/* 交互逻辑：网格画布 + 点选/拖动 + 导入/导出 JSON */
+const canvas = document.getElementById('gridCanvas');
+const ctx = canvas.getContext('2d');
 
-  <canvas id="preview" width="300" height="300"></canvas>
-  <pre id="output"></pre>
+let gridW = parseInt(document.getElementById('gridW').value,10);
+let gridH = parseInt(document.getElementById('gridH').value,10);
+let cellPx = parseInt(document.getElementById('cellPx').value,10);
+let offset = {x:20,y:20}; // 留白以画坐标轴
+let leds = []; // [{x:col,y:row}]
+let dragging = null; // index of led being dragged
+let hoverCell = null;
 
-  <script src="script.js"></script>
+function resizeCanvasByCell() {
+  // 自动把画布大小按 cellPx * max(gridW,gridH) 保持正方形显示
+  const size = Math.max(gridW * cellPx, gridH * cellPx) + offset.x*2;
+  canvas.width = Math.max(size, 300);
+  canvas.height = Math.max(size, 300);
+}
+
+function genGrid() {
+  gridW = Math.max(1, parseInt(document.getElementById('gridW').value,10));
+  gridH = Math.max(1, parseInt(document.getElementById('gridH').value,10));
+  cellPx = Math.max(6, parseInt(document.getElementById('cellPx').value,10));
+  resizeCanvasByCell();
+  drawAll();
+}
+
+function clearLeds() {
+  leds = [];
+  updateUI();
+  drawAll();
+}
+
+function resetLeds() {
+  // 仅清除 LED，不改变网格
+  leds = [];
+  updateUI();
+  drawAll();
+}
+
+function drawAll() {
+  // 背景
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // grid lines and labels
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 1;
+
+  // vertical lines
+  for (let i=0;i<=gridW;i++) {
+    const x = offset.x + i*cellPx;
+    ctx.beginPath();
+    ctx.moveTo(x, offset.y);
+    ctx.lineTo(x, offset.y + gridH*cellPx);
+    ctx.stroke();
+  }
+  // horizontal lines
+  for (let j=0;j<=gridH;j++) {
+    const y = offset.y + j*cellPx;
+    ctx.beginPath();
+    ctx.moveTo(offset.x, y);
+    ctx.lineTo(offset.x + gridW*cellPx, y);
+    ctx.stroke();
+  }
+
+  // labels (top column indices)
+  ctx.fillStyle = '#111';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  for (let i=0;i<gridW;i++) {
+    const x = offset.x + i*cellPx + cellPx/2;
+    ctx.fillText(i, x, offset.y - 8);
+  }
+  // left row indices
+  ctx.textAlign = 'right';
+  for (let j=0;j<gridH;j++) {
+    const y = offset.y + j*cellPx + cellPx/2 + 6;
+    ctx.fillText(j, offset.x - 8, y);
+  }
+
+  // hover highlight
+  if (hoverCell) {
+    ctx.fillStyle = 'rgba(47,126,252,0.12)';
+    ctx.fillRect(offset.x + hoverCell.x*cellPx+1, offset.y + hoverCell.y*cellPx+1, cellPx-1, cellPx-1);
+  }
+
+  // draw leds
+  leds.forEach((pt, idx) => {
+    const cx = offset.x + pt.x*cellPx + cellPx/2;
+    const cy = offset.y + pt.y*cellPx + cellPx/2;
+    // circle bg
+    ctx.beginPath();
+    ctx.fillStyle = '#2f7efc';
+    ctx.arc(cx, cy, Math.max(6, cellPx/3), 0, Math.PI*2);
+    ctx.fill();
+    // index label
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.max(10, cellPx/6)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(idx, cx, cy);
+    // ring if dragging
+    if (dragging === idx) {
+      ctx.strokeStyle = '#ffa500';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(6, cellPx/3)+4, 0, Math.PI*2);
+      ctx.stroke();
+    }
+  });
+}
+
+function pointToCell(px, py) {
+  const x = Math.floor((px - offset.x) / cellPx);
+  const y = Math.floor((py - offset.y) / cellPx);
+  if (x < 0 || x >= gridW || y < 0 || y >= gridH) return null;
+  return {x, y};
+}
+
+function findLedAtCell(cell) {
+  if (!cell) return -1;
+  for (let i=0;i<leds.length;i++){
+    if (leds[i].x === cell.x && leds[i].y === cell.y) return i;
+  }
+  return -1;
+}
+
+canvas.addEventListener('mousemove', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  hoverCell = cell;
+  if (dragging !== null) {
+    // live move marker while dragging (visual only). We'll update on mouseup.
+    // Snap to cell under cursor if valid
+    drawAll();
+    return;
+  }
+  drawAll();
+});
+
+canvas.addEventListener('mouseleave', ()=>{ hoverCell = null; drawAll(); });
+
+canvas.addEventListener('mousedown', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  if (!cell) return;
+  const idx = findLedAtCell(cell);
+  if (idx >= 0) {
+    // start drag
+    dragging = idx;
+    drawAll();
+    return;
+  }
+  // place new led
+  leds.push({x: cell.x, y: cell.y});
+  updateUI();
+  drawAll();
+});
+
+canvas.addEventListener('mouseup', (e)=>{
+  if (dragging === null) return;
+  // drop to current hover cell
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  if (cell) {
+    // if occupied by other led, swap positions; else set
+    const other = findLedAtCell(cell);
+    if (other >= 0 && other !== dragging) {
+      // swap
+      const tmp = { ...leds[other] };
+      leds[other] = { ...leds[dragging] };
+      leds[dragging] = tmp;
+    } else {
+      leds[dragging] = {x: cell.x, y: cell.y};
+    }
+  }
+  dragging = null;
+  updateUI();
+  drawAll();
+});
+
+canvas.addEventListener('dblclick', (e)=>{
+  // 双击删除当前坐标的 LED（方便）
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  const idx = findLedAtCell(cell);
+  if (idx >= 0) {
+    leds.splice(idx,1);
+    updateUI();
+    drawAll();
+  }
+});
+
+function updateUI() {
+  document.getElementById('ledCount').textContent = leds.length;
+  const json = buildJsonPreview();
+  document.getElementById('jsonOut').textContent = JSON.stringify(json, null, 2);
+}
+
+function buildJsonPreview() {
+  const prod = document.getElementById('prodName').value || 'CustomFan';
+  const disp = document.getElementById('displayName').value || prod;
+  const brand = document.getElementById('brand').value || 'Custom';
+  const coords = leds.map(p => [p.x, p.y]);
+  return {
+    ProductName: prod,
+    DisplayName: disp,
+    Brand: brand,
+    Type: "custom",
+    LedCount: coords.length,
+    Width: gridW,
+    Height: gridH,
+    LedMapping: coords.map((_,i)=>i),
+    LedCoordinates: coords,
+    LedNames: coords.map((_,i)=>"Led"+(i+1))
+  };
+}
+
+// Buttons wiring
+document.getElementById('btnGen').addEventListener('click', ()=>{
+  genGrid();
+  // keep current leds if within bounds; remove those out of bounds
+  leds = leds.filter(p => p.x >=0 && p.x < gridW && p.y >=0 && p.y < gridH);
+  updateUI();
+});
+
+document.getElementById('btnReset').addEventListener('click', ()=>{
+  resetLeds();
+});
+
+document.getElementById('btnClear').addEventListener('click', ()=>{
+  if (!confirm('清空所有灯珠？')) return;
+  clearLeds();
+});
+
+document.getElementById('btnOpen').addEventListener('click', ()=> {
+  document.getElementById('fileIn').click();
+});
+
+document.getElementById('fileIn').addEventListener('change', (ev)=>{
+  const f = ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try {
+      const data = JSON.parse(e.target.result);
+      // read basic fields if exist
+      if (data.Width && data.Height) {
+        document.getElementById('gridW').value = data.Width;
+        document.getElementById('gridH').value = data.Height;
+        gridW = data.Width;
+        gridH = data.Height;
+      }
+      if (data.ProductName) document.getElementById('prodName').value = data.ProductName;
+      if (data.DisplayName) document.getElementById('displayName').value = data.DisplayName;
+      if (data.Brand) document.getElementById('brand').value = data.Brand;
+      // coords
+      leds = [];
+      if (Array.isArray(data.LedCoordinates)) {
+        data.LedCoordinates.forEach(c => {
+          if (Array.isArray(c) && c.length>=2) {
+            const x = parseInt(c[0],10), y = parseInt(c[1],10);
+            if (!Number.isNaN(x) && !Number.isNaN(y)) leds.push({x,y});
+          }
+        });
+      }
+      resizeCanvasByCell();
+      drawAll();
+      updateUI();
+    } catch(err) {
+      alert('导入 JSON 失败：' + err);
+    }
+  };
+  reader.readAsText(f);
+  // reset input so same file can be loaded again later
+  ev.target.value = '';
+});
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const json = buildJsonPreview();
+  document.getElementById('jsonOut').textContent = JSON.stringify(json, null, 2);
+});
+
+document.getElementById('btnDownload').addEventListener('click', ()=>{
+  const json = buildJsonPreview();
+  const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const name = (json.ProductName||'model') + '.json';
+  a.download = name;
+  a.click();
+});
+
+// init
+genGrid();
+updateUI();
+
+</script>
 </body>
 </html>
