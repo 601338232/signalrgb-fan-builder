@@ -80,7 +80,7 @@
 
       <div class="meta">
         <div class="stat">灯珠数量： <span id="ledCount">0</span></div>
-        <div class="stat">当前模式：<span id="mode">点选放置 / 拖动移动</span></div>
+        <div class="stat">当前模式：<span id="mode">点选放置 / 拖动移动 / 滑动绘制</span></div>
       </div>
 
       <div style="margin-top:10px;">
@@ -89,8 +89,8 @@
       </div>
 
       <footer>
-        使用方法：生成网格 → 单击格子添加 LED → 双击击删除 → 拖动已放置 LED 可移动位置。<br>
-        生成后点击"导出"保存模型到本地（C:\Users\用户名\文档\WhirlwindFX\Components）。
+        使用方法：生成网格 → 单击格子添加 LED → 双击删除 → 拖动已放置 LED 可移动 → 按住空格子滑动可连续绘制。<br>
+        导出时保存到（C:\Users\用户名\文档\WhirlwindFX\Components）。
       </footer>
     </div>
 
@@ -109,30 +109,25 @@ let cellPx = parseInt(document.getElementById('cellPx').value,10);
 let offset = {x:20,y:20};
 let leds = []; // {x, y, animX, animY}
 let dragging = null;
+let drawing = false;
 let hoverCell = null;
 let imageBase64 = "";
 
-// 获取自动生成的产品名（用于导出的JSON）
+// 工具函数
 function getAutoProductName() {
   const baseName = document.getElementById('prodName').value || 'CustomFan';
   const ledCount = leds.length;
   return `${baseName} - ${ledCount}LED`;
 }
-
-// 获取品牌名称（如果为空则返回CompGen）
 function getBrand() {
   const brand = document.getElementById('brand').value.trim();
   return brand || 'CompGen';
 }
-
-// resize canvas
 function resizeCanvasByCell() {
   const size = Math.max(gridW * cellPx, gridH * cellPx) + offset.x*2;
   canvas.width = Math.max(size, 300);
   canvas.height = Math.max(size, 300);
 }
-
-// 构建网格
 function genGrid() {
   gridW = Math.max(1, parseInt(document.getElementById('gridW').value,10));
   gridH = Math.max(1, parseInt(document.getElementById('gridH').value,10));
@@ -141,20 +136,14 @@ function genGrid() {
   leds = leds.filter(p => p.x >=0 && p.x < gridW && p.y >=0 && p.y < gridH);
   drawAll();
 }
-
-// 清空 LED
 function clearLeds() { leds = []; updateUI(); drawAll(); }
 function resetLeds() { leds = []; drawAll(); updateUI(); }
-
-// 将像素坐标映射到格子
 function pointToCell(px, py) {
   const x = Math.floor((px - offset.x) / cellPx);
   const y = Math.floor((py - offset.y) / cellPx);
   if (x < 0 || x >= gridW || y < 0 || y >= gridH) return null;
   return {x, y};
 }
-
-// 找 LED 索引
 function findLedAtCell(cell) {
   if (!cell) return -1;
   for (let i=0;i<leds.length;i++){
@@ -162,14 +151,10 @@ function findLedAtCell(cell) {
   }
   return -1;
 }
-
-// 更新 UI 和 JSON 预览
 function updateUI() {
   document.getElementById('ledCount').textContent = leds.length;
   document.getElementById('jsonOut').textContent = JSON.stringify(buildJsonPreview(), null, 2);
 }
-
-// 构建 JSON（用于预览）
 function buildJsonPreview() {
   const prod = document.getElementById('prodName').value || 'CustomFan';
   const brand = getBrand();
@@ -189,8 +174,6 @@ function buildJsonPreview() {
   if (imageBase64) out.Image = imageBase64;
   return out;
 }
-
-// 构建导出用的JSON
 function buildExportJson() {
   const prod = getAutoProductName();
   const brand = getBrand();
@@ -211,7 +194,7 @@ function buildExportJson() {
   return out;
 }
 
-// 绘制 LED
+// 绘制
 function drawAll() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle = '#fff';
@@ -254,12 +237,46 @@ function drawAll() {
   requestAnimationFrame(drawAll);
 }
 
-// 鼠标事件
-canvas.addEventListener('mousemove', (e)=>{ const r = canvas.getBoundingClientRect(); const p = {x: e.clientX - r.left, y: e.clientY - r.top}; const cell = pointToCell(p.x, p.y); hoverCell = cell; if (dragging !== null && cell) leds[dragging] = {x: cell.x, y: cell.y}; });
-canvas.addEventListener('mousedown', (e)=>{ const r = canvas.getBoundingClientRect(); const p = {x: e.clientX - r.left, y: e.clientY - r.top}; const cell = pointToCell(p.x, p.y); if (!cell) return; const idx = findLedAtCell(cell); if (idx >= 0) dragging = idx; else { leds.push({x: cell.x, y: cell.y}); updateUI(); } });
-canvas.addEventListener('mouseup', (e)=>{ if (dragging === null) return; const r = canvas.getBoundingClientRect(); const p = {x: e.clientX - r.left, y: e.clientY - r.top}; const cell = pointToCell(p.x, p.y); if (cell) { const other = findLedAtCell(cell); if (other >= 0 && other !== dragging) { const tmp = { ...leds[other] }; leds[other] = { ...leds[dragging] }; leds[dragging] = tmp; } else leds[dragging] = {x: cell.x, y: cell.y}; } dragging = null; updateUI(); });
-canvas.addEventListener('mouseleave', ()=>{ hoverCell=null; });
-canvas.addEventListener('dblclick', (e)=>{ const r = canvas.getBoundingClientRect(); const p = {x:e.clientX-r.left, y:e.clientY-r.top}; const cell = pointToCell(p.x, p.y); const idx = findLedAtCell(cell); if(idx>=0){ leds.splice(idx,1); updateUI(); } });
+// 鼠标事件（加入滑动绘制）
+canvas.addEventListener('mousedown', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  if (!cell) return;
+  const idx = findLedAtCell(cell);
+  if (idx >= 0) {
+    dragging = idx;
+  } else {
+    leds.push({x: cell.x, y: cell.y});
+    updateUI();
+    drawing = true;
+  }
+});
+canvas.addEventListener('mousemove', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const p = {x: e.clientX - r.left, y: e.clientY - r.top};
+  const cell = pointToCell(p.x, p.y);
+  hoverCell = cell;
+  if (dragging !== null && cell) {
+    leds[dragging] = {x: cell.x, y: cell.y};
+  }
+  if (drawing && cell) {
+    const idx = findLedAtCell(cell);
+    if (idx === -1) {
+      leds.push({x: cell.x, y: cell.y});
+      updateUI();
+    }
+  }
+});
+canvas.addEventListener('mouseup', ()=>{ dragging = null; drawing = false; });
+canvas.addEventListener('mouseleave', ()=>{ hoverCell=null; drawing=false; dragging=null; });
+canvas.addEventListener('dblclick', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const p = {x:e.clientX-r.left, y:e.clientY-r.top};
+  const cell = pointToCell(p.x, p.y);
+  const idx = findLedAtCell(cell);
+  if(idx>=0){ leds.splice(idx,1); updateUI(); }
+});
 
 // 按钮
 document.getElementById('btnGen').addEventListener('click', ()=>genGrid());
